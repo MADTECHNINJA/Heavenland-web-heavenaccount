@@ -1,0 +1,63 @@
+body {
+    @apply bg-indigo-950 text-white;
+}
+
+main#appMain {
+    @apply relative;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+main#appMain:not(.withoutBg)::before {
+    content: '';
+    background: url('assets/bg3.jpg') center center;
+    background-size: cover;
+    @apply fixed top-0 right-0 left-0 bottom-0 opacity-10 -z-10;
+}
+
+.text-justify-center {
+    text-align: justify;
+    text-align-last: center;
+}
+
+#__nuxt .hyperlink {
+    @apply text-indigo-300 underline underline-offset-2;
+}
+
+#__nuxt {
+    @apply relative min-h-screen pb-10;
+}
+
+.custom-scrollbar {
+    scrollbar-width: auto;
+    scrollbar-color: #001540 transparent;
+}
+
+/* Chrome, Edge, and Safari */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.25);
+    border-radius: 10px;
+    border: 0;
+}
+
+.input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+    background-color: black;
+}
+
+input:-internal-autofill-selected {
+    background-color: red !important;
+}

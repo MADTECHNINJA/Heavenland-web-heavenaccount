@@ -1,0 +1,224 @@
+options:
+  docker: true
+  size: 2x
+
+
+definitions:
+  services:
+    docker:
+      memory: 6144 
+  steps:
+    - step: &justEchoStage
+        name: Just a simple "Echo Stage"
+        script:
+          - echo "Hey this is just a simple echo stage."
+
+    - step: &build-web-heavenaccount-staging-image
+        name: Build Web Heavenaccount Docker image - Staging
+        image: adoptopenjdk/openjdk11:jre-11.0.9_11.1-alpine
+        script:
+          - apk add --no-cache openssh-client bash
+          - docker build -f Dockerfile.staging --build-arg AuthToken=$FONTAWESOME_AUTHTOKEN -t web_heavenaccount_staging  .
+          - docker save --output web-heavenaccount-staging-tmp-image.docker web_heavenaccount_staging
+        artifacts:
+          - web-heavenaccount-staging-tmp-image.docker
+    
+    - step: &build-web-heavenaccount-prod-image
+        name: Build Web Heavenaccount Docker image - Production
+        image: adoptopenjdk/openjdk11:jre-11.0.9_11.1-alpine
+        script:
+          - apk add --no-cache openssh-client bash
+          - docker build --build-arg AuthToken=$FONTAWESOME_AUTHTOKEN -t web_heavenaccount  .
+          - docker save --output web-heavenaccount-tmp-image.docker web_heavenaccount
+        artifacts:
+          - web-heavenaccount-tmp-image.docker
+
+    - step: &deploy-to-staging
+        name: Deploy to staging server
+        script:
+          - export CLUSTER_ZONE=europe-west1-b
+          - source $BITBUCKET_CLONE_DIR/gcloud.sh
+          # Downloading the Google Cloud SDK
+          - curl -o /tmp/google-cloud-sdk.tar.gz https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-388.0.0-linux-x86_64.tar.gz
+          - tar -xvf /tmp/google-cloud-sdk.tar.gz -C /tmp/
+          - /tmp/google-cloud-sdk/install.sh -q
+          - source /tmp/google-cloud-sdk/path.bash.inc
+          # Downloading the Helm
+          - curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
+          - helm version
+          # Authenticating with the service account key file
+          - echo $STAGING_GCLOUD_API_KEYFILE | base64 -d > ./gcloud-api-key.json
+          - gcloud components install gke-gcloud-auth-plugin
+          - export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+          - gcloud auth activate-service-account --key-file gcloud-api-key.json
+          - gcloud config set project heavenland-staging
+          # Tag image & push web heavenaccount image
+          - docker load --input ./web-heavenaccount-staging-tmp-image.docker
+          - export WEB_IMAGE_NAME=europe-west1-docker.pkg.dev/heavenland-staging/web-heavenaccount/web-heavenaccount:$(echo $BITBUCKET_COMMIT | cut -c1-8)
+          - docker tag web_heavenaccount_staging ${WEB_IMAGE_NAME}
+          # check if google artifacts repository exist. If not create
+          - gcloud artifacts repositories list|grep web-heavenaccount || gcloud artifacts repositories create web-heavenaccount --repository-format=docker --location=europe-west1
+          # Login to google artifact registry
+          - gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin europe-west1-docker.pkg.dev
+          - docker push ${WEB_IMAGE_NAME}
+
+          # Just to confirm the image tag
+          - echo "DOCKER_IMAGE_TAG=$(echo $BITBUCKET_COMMIT | cut -c1-8)" > latest_build_image_tag.sh
+          - cat latest_build_image_tag.sh
+
+          - gcloud container clusters get-credentials general-cluster --zone $CLUSTER_ZONE --project heavenland-staging
+          - helm upgrade 
+            --install
+            --namespace="heavenaccount-staging"
+            --set app.release_name="web-heavenaccount-staging-release"
+            --set app.name="web-heavenaccount"
+            --set image.repository="europe-west1-docker.pkg.dev/heavenland-staging"
+            --set image.tag="$(echo $BITBUCKET_COMMIT | cut -c1-8)"
+            --set app.ingress.name="web-heavenaccount-ingress"
+            --set app.ingress.tunnel_name="gke-tunnel-origin.heavenland.io"
+            --set app.ingress.host="account.staging.heavenland.io"
+            --set app.replicaCount="2"
+            --set app.namespace="heavenaccount-staging"
+            --set app.service.port="80"
+            --set app.container.env.port="3000"
+            --set app.service.name="web-heavenaccount-staging"
+            --wait
+            --timeout 600s
+            --debug
+            web-heavenaccount-staging-release
+            ./deployment/web-heavenaccount
+
+    - step: &deploy-to-production
+        name: Deploy to production server
+        script:
+          - export CLUSTER_ZONE=europe-west1-b
+          - source $BITBUCKET_CLONE_DIR/gcloud.sh
+          # Downloading the Google Cloud SDK
+          - curl -o /tmp/google-cloud-sdk.tar.gz https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-388.0.0-linux-x86_64.tar.gz
+          - tar -xvf /tmp/google-cloud-sdk.tar.gz -C /tmp/
+          - /tmp/google-cloud-sdk/install.sh -q
+          - source /tmp/google-cloud-sdk/path.bash.inc
+          # Downloading the Helm
+          - curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
+          - helm version
+          # Authenticating with the service account key file
+          - echo $PROD_GCLOUD_API_KEYFILE | base64 -d > ./gcloud-api-key.json
+          - gcloud components install gke-gcloud-auth-plugin
+          - export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+          - gcloud auth activate-service-account --key-file gcloud-api-key.json
+          - gcloud config set project heavenland-production
+          # Tag image & push web heavenaccount image
+          - docker load --input ./web-heavenaccount-tmp-image.docker
+          - export WEB_IMAGE_NAME=europe-west1-docker.pkg.dev/heavenland-production/web-heavenaccount/web-heavenaccount:$(echo $BITBUCKET_COMMIT | cut -c1-8)
+          - docker tag web_heavenaccount ${WEB_IMAGE_NAME}
+          # check if google artifacts repository exist. If not create
+          - gcloud artifacts repositories list|grep web-heavenaccount || gcloud artifacts repositories create web-heavenaccount --repository-format=docker --location=europe-west1
+          # Login to google artifact registry
+          - gcloud auth print-access-token | docker login -u oauth2accesstoken --password-stdin europe-west1-docker.pkg.dev
+          - docker push ${WEB_IMAGE_NAME}
+
+          # Just to confirm the image tag
+          - echo "DOCKER_IMAGE_TAG=$(echo $BITBUCKET_COMMIT | cut -c1-8)" > latest_build_image_tag.sh
+          - cat latest_build_image_tag.sh
+
+          - gcloud container clusters get-credentials general-cluster --zone $CLUSTER_ZONE --project heavenland-production
+          - helm upgrade 
+            --install
+            --namespace="heavenaccount-production"
+            --set app.release_name="web-heavenaccount-prod-release"
+            --set app.name="web-heavenaccount"
+            --set app.ingress.name="web-heavenaccount-ingress"
+            --set app.ingress.tunnel_name="prod-gke-tunnel-origin.heavenland.io"
+            --set app.ingress.host="account.heavenland.io"
+            --set app.replicaCount="2"
+            --set app.namespace="heavenaccount-production"
+            --set app.service.port="80"
+            --set app.container.env.port="3000"
+            --set app.service.name="web-heavenaccount-prod"
+            --set image.tag="$(echo $BITBUCKET_COMMIT | cut -c1-8)"
+            --wait
+            --timeout 600s
+            --debug
+            web-heavenaccount-prod-release
+            ./deployment/web-heavenaccount-production
+
+
+# develop pipeline
+    - step: &build-web-heavenaccount-image-develop
+        name: Build Web Heavenaccount Docker image - develop
+        image: node:alpine
+        script:
+          - docker build -f Dockerfile.develop --build-arg AuthToken=$FONTAWESOME_AUTHTOKEN -t web-heavenaccount-develop:${BITBUCKET_COMMIT} .
+          - docker save --output tmp-image.docker web-heavenaccount-develop
+        artifacts:
+          - tmp-image.docker
+
+    - step: &deploy-to-develop
+        name: Deploy to develop server
+        image: google/cloud-sdk:alpine
+        script:
+          - docker load --input ./tmp-image.docker
+          # Authenticating with the service account key file
+          - echo $DEVELOP_GCLOUD_API_KEYFILE> /tmp/gcloud-api-key.json
+          - gcloud components install gke-gcloud-auth-plugin
+          - export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+          - gcloud auth activate-service-account --key-file /tmp/gcloud-api-key.json
+          - gcloud config set project heavenland-development
+          # Tag container & push
+          - export TAG=$(echo "$BITBUCKET_TAG" | sed -e "s/v//g")
+          - export SUFFIX=$([[ ! -z "$TAG" ]] && echo ":$TAG" || echo "")
+          - export IMAGE_NAME=gcr.io/heavenland-development/web-heavenaccount-develop:${BITBUCKET_COMMIT}
+          - docker tag web-heavenaccount-develop:${BITBUCKET_COMMIT} ${IMAGE_NAME}
+          # Login to google docker hub
+          - cat /tmp/gcloud-api-key.json | docker login -u _json_key --password-stdin https://gcr.io
+          - docker push ${IMAGE_NAME}
+          - gcloud container images list
+          - curl -o /tmp/google-cloud-sdk.tar.gz https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-388.0.0-linux-x86_64.tar.gz
+          - tar -xvf /tmp/google-cloud-sdk.tar.gz -C /tmp/
+          - /tmp/google-cloud-sdk/install.sh -q
+          - source /tmp/google-cloud-sdk/path.bash.inc
+          - apk add --no-cache openssh-client bash
+          # download helm
+          - export VERIFY_CHECKSUM=false
+          - curl -sSL https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
+          - helm version
+          # push gke and aplly helm
+          - gcloud container clusters get-credentials general-cluster --zone=europe-west1-b --project heavenland-development
+          - gcloud components install kubectl
+          # upgrade helm for develop
+          - helm upgrade 
+            --install
+            --namespace="heavenaccount-develop"
+            --set app.name="web-heavenaccount-develop"
+            --set ingress.name="web-heavenaccount-develop-ingress"
+            --set ingress.host="account.dev.heavenland.io"
+            --set app.replicaCount="2"
+            --set app.namespace="heavenaccount-develop"
+            --set service.port="3000"
+            --set service.type="NodePort"
+            --set app.port="3000"
+            --set service.name="web-heavenaccount-develop"
+            --set image.tag="${BITBUCKET_COMMIT}"
+            --wait
+            --timeout 1000s
+            --debug
+            web-heavenaccount-develop-release
+            ./deployment/web-heavenaccount-develop
+pipelines:
+  tags:
+    v*:
+      - step: *build-web-heavenaccount-staging-image
+      - step: *build-web-heavenaccount-prod-image
+
+  branches:
+    staging:
+      - step: *build-web-heavenaccount-staging-image
+      - step: *deploy-to-staging
+    production:
+      - step: *build-web-heavenaccount-prod-image
+      - step: *deploy-to-production
+    develop:
+      - step: *build-web-heavenaccount-image-develop
+      - step: *deploy-to-develop
+    main:
+      - step: *justEchoStage

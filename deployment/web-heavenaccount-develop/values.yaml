@@ -1,0 +1,35 @@
+app:
+  name:  web-account-service-develop
+  namespace: web-account-service-develop
+  port: 3000
+  replicaCount: 1
+
+image:
+  repository: nginx
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "latest"
+  name:
+  repo:
+
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: "web-account-service-develop"
+
+service:
+  name: web-account-service-develop-cluster
+  type: ClusterIP
+  port: 80
+
+ingress:
+  name:  web-account-service-develop-ingress
+  enabled: false
+  hosts:
+  tunnel_name:
+  target:

@@ -1,0 +1,29 @@
+app:
+    group: web
+    service:
+      type: ClusterIP
+    ingress:
+      host:
+image:
+  repository: europe-west1-docker.pkg.dev/heavenland-production
+  repo: web-heavenaccount
+  name: web-heavenaccount
+
+resources: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+environment: {}
+
+global:
+  replicaCount: 2
+  environment: {}
+
+replicaCount: 2
+minReplicas: 2
+maxReplicas: 10
+targetCPUup: 60
